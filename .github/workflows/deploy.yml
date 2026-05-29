@@ -1,0 +1,116 @@
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main]
+  repository_dispatch:
+    types: [leibniz-updated, hf-updated]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy console
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out pages configuration
+        uses: actions/checkout@v4
+
+      - name: Read source configuration
+        id: config
+        run: |
+          echo "leibniz_repository=$(jq -r '.leibniz.repository' sources.json)" >> "$GITHUB_OUTPUT"
+          echo "leibniz_ref=$(jq -r '.leibniz.ref' sources.json)" >> "$GITHUB_OUTPUT"
+          echo "base_path=$(jq -r '.site.base_path' sources.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Leibniz
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.config.outputs.leibniz_repository }}
+          ref: ${{ steps.config.outputs.leibniz_ref }}
+          path: leibniz
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: leibniz/src/leibniz/console/_web_src/package-lock.json
+
+      - name: Install Leibniz
+        working-directory: leibniz
+        run: python -m pip install -e .
+
+      - name: Install console dependencies
+        working-directory: leibniz/src/leibniz/console/_web_src
+        run: npm ci
+
+      - name: Clone Hugging Face result sources
+        id: hf
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          result_root="$RUNNER_TEMP/leibniz-result-sources"
+          mkdir -p "$result_root"
+          jq -c '.huggingface.repositories[] | select(.enabled == true)' sources.json |
+            while read -r source; do
+              repo_id="$(jq -r '.repo_id' <<< "$source")"
+              repo_type="$(jq -r '.repo_type // "dataset"' <<< "$source")"
+              revision="$(jq -r '.revision // "main"' <<< "$source")"
+              target="$result_root/$(tr '/:' '__' <<< "$repo_id")"
+              case "$repo_type" in
+                dataset) hf_path="datasets/$repo_id" ;;
+                model) hf_path="$repo_id" ;;
+                space) hf_path="spaces/$repo_id" ;;
+                *)
+                  echo "unsupported Hugging Face repo_type: $repo_type" >&2
+                  exit 1
+                  ;;
+              esac
+              if [ -n "${HF_TOKEN:-}" ]; then
+                url="https://oauth2:${HF_TOKEN}@huggingface.co/$hf_path"
+              else
+                url="https://huggingface.co/$hf_path"
+              fi
+              GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --branch "$revision" "$url" "$target"
+            done
+          roots="$(find "$result_root" -mindepth 1 -maxdepth 1 -type d | sort | paste -sd: -)"
+          echo "result_roots=$roots" >> "$GITHUB_OUTPUT"
+
+      - name: Build static console
+        working-directory: leibniz/src/leibniz/console/_web_src
+        env:
+          LEIBNIZ_CONSOLE_BASE_PATH: ${{ steps.config.outputs.base_path }}
+          LEIBNIZ_CONSOLE_RESULT_ROOTS: ${{ steps.hf.outputs.result_roots }}
+        run: npm run build
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: leibniz/src/leibniz/console/_web_src/dist
+
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

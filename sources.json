@@ -1,0 +1,21 @@
+{
+  "site": {
+    "title": "Leibniz Results",
+    "base_path": "/leibniz-pages/"
+  },
+  "leibniz": {
+    "repository": "community-science/leibniz",
+    "ref": "main"
+  },
+  "huggingface": {
+    "repositories": [
+      {
+        "repo_id": "maximumcats/leibniz-results",
+        "repo_type": "dataset",
+        "label": "maximumcats",
+        "revision": "main",
+        "enabled": true
+      }
+    ]
+  }
+}
