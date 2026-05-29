@@ -1,7 +1,7 @@
 {
   "site": {
     "title": "Leibniz Results",
-    "base_path": "/leibniz-pages/"
+    "base_path": "/"
   },
   "leibniz": {
     "repository": "community-science/leibniz",
