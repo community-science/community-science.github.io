@@ -47,6 +47,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: leibniz/pyproject.toml
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -57,7 +59,7 @@ jobs:
 
       - name: Install Leibniz
         working-directory: leibniz
-        run: python -m pip install -e .
+        run: python -m pip install -e '.[console]'
 
       - name: Install console dependencies
         working-directory: leibniz/src/leibniz/console/_web_src
